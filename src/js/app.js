@@ -1,10 +1,12 @@
 App = {
   web3Provider: null,
+  web3 = null,
+  account: null,
   contracts: {},
 
   init: async function() {
     // Load pets.
-    $.getJSON('../pets.json', function(data) {
+    $.getJSON('pets.json', function(data) {
       var petsRow = $('#petsRow');
       var petTemplate = $('#petTemplate');
 
@@ -24,26 +26,29 @@ App = {
   },
 
   initWeb3: async function() {
-    // Modern dapp browsers...
-    if (window.ethereum) {
-      App.web3Provider = window.ethereum;
+    // Initialize App's web3Provider
+    App.web3Provider = await detectEthereumProvider()
+
+    if (App.web3Provider) {
+      // Track if user changes account in Metamask
+      App.web3Provider.on("accountsChanged", (accounts) => {
+        if (accounts.length > 0)
+          App.account = accounts[0]
+      })
+      // Anchor web3 in App
+      App.web3 = new Web3(App.web3Provider);
+      // Trigger metamask to prompt for connecting accounts
       try {
-        // Request account access
-        await window.ethereum.enable();
-      } catch (error) {
-        // User denied account access...
-        console.error("User denied account access")
+        let accs = await ethereum.request({ method: 'eth_requestAccounts' });
+        App.account = accs[0]
+      } catch {
+        console.error('Something funny with your wallet. Install metamask?')
       }
+    } else {
+      // This shouldn't be in a prod app.
+      console.warn("No web3 detected. Falling back to http://127.0.0.1:8545. You should remove this fallback when you deploy live",);
+      App.web3 = new Web3(new Web3.providers.HttpProvider("http://127.0.0.1:8545"),);
     }
-    // Legacy dapp browsers...
-    else if (window.web3) {
-      App.web3Provider = window.web3.currentProvider;
-    }
-    // If no injected web3 instance is detected, fall back to Ganache
-    else {
-      App.web3Provider = new Web3.providers.HttpProvider('http://localhost:7545');
-    }
-    web3 = new Web3(App.web3Provider);
 
     return App.initContract();
   },
@@ -93,23 +98,15 @@ App = {
 
     var adoptionInstance;
 
-    web3.eth.getAccounts(function(error, accounts) {
-      if (error) {
-        console.log(error);
-      }
+    App.contracts.Adoption.deployed().then(function(instance) {
+      adoptionInstance = instance;
 
-      var account = accounts[0];
-
-      App.contracts.Adoption.deployed().then(function(instance) {
-        adoptionInstance = instance;
-
-        // Execute adopt as a transaction by sending account
-        return adoptionInstance.adopt(petId, {from: account});
-      }).then(function(result) {
-        return App.markAdopted();
-      }).catch(function(err) {
-        console.log(err.message);
-      });
+      // Execute adopt as a transaction by sending account
+      return adoptionInstance.adopt(petId, {from: App.account});
+    }).then(function(result) {
+      return App.markAdopted();
+    }).catch(function(err) {
+      console.log(err.message);
     });
   }
 
